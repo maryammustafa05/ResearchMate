@@ -7,6 +7,7 @@ from fastembed import TextEmbedding
 from fastapi import FastAPI,UploadFile,File,HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import io
+from arxiv_search import search_arxiv, download_pdf
 
 load_dotenv()
 app=FastAPI( title="ResearchMate API",
@@ -108,6 +109,30 @@ def ask(session_id: str, question: str):
     answer, sources = ask_question(collection, question)
 
     return {
+        "answer": answer,
+        "sources": sources,
+        "session_id": session_id
+    }
+@app.post("/search_and_ask")
+def search_and_ask(topic:str,question:str):
+    results=search_arxiv(topic,max_results=1)
+    if not results:
+        raise HTTPException(status_code=404, detail="No papers found for this topic")
+    
+    paper = results[0]
+    pdf_bytes=download_pdf(paper["pdf_url"])
+    text = read_pdf_bytes(pdf_bytes)
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Could not extract text from the found paper")
+    chunks = chunk_text(text)
+    session_id = paper["title"][:30].replace(" ", "_").replace(",", "")
+    collection = store_chunks(chunks, session_id)
+    sessions[session_id] = collection
+    answer, sources = ask_question(collection, question)
+    return {
+        "paper_found": paper["title"],
+        "pdf_url": paper["pdf_url"],
+        "question": question,
         "answer": answer,
         "sources": sources,
         "session_id": session_id
