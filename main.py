@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from groq import Groq
 import chromadb
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 from fastapi import FastAPI,UploadFile,File,HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import io
@@ -18,7 +18,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
-embedder = SentenceTransformer('all-mpnet-base-v2')
+embedder = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
 groq_client=Groq(api_key=os.getenv("GROQ_API_KEY"))
 sessions={}
 
@@ -47,13 +47,15 @@ def store_chunks(chunks,session_id):
         pass
     collection = client.create_collection("session_id")
 
-    embeddings = embedder.encode(chunks).tolist()
+    embeddings = list(embedder.embed(chunks))
+    embeddings = [e.tolist() for e in embeddings]
     ids = [f"chunk_{i}" for i in range(len(chunks))]
     collection.add(documents=chunks, embeddings=embeddings, ids=ids)
     return collection
 
 def ask_question(collection, question):
-    question_embedding = embedder.encode([question]).tolist()
+    question_embedding = list(embedder.embed([question]))
+    question_embedding = [e.tolist() for e in question_embedding]
     results = collection.query(query_embeddings=question_embedding, n_results=3)
     relevant_chunks = results["documents"][0]
 
