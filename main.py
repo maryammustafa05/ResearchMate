@@ -39,13 +39,13 @@ def chunk_text(text, chunk_size=300, overlap=50):
         i += chunk_size - overlap
     return chunks
 
-def store_chunks(chunks,session_id):
+def store_chunks(chunks, session_id):
     client = chromadb.Client()
     try:
-        client.delete_collection("session_id")
+        client.delete_collection(session_id)
     except Exception:
         pass
-    collection = client.create_collection("session_id")
+    collection = client.create_collection(session_id)
 
     embeddings = list(embedder.embed(chunks))
     embeddings = [e.tolist() for e in embeddings]
