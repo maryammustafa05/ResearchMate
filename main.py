@@ -150,3 +150,43 @@ def search_and_ask(topic:str,question:str):
         "sources": sources,
         "session_id": session_id
     }
+@app.post("/compare")
+def compare_papers(session_ids: list[str], question: str):
+    client = chromadb.PersistentClient(path="./chroma_data")
+    question_embedding = list(embedder.embed([question]))
+    question_embedding = [e.tolist() for e in question_embedding]
+    all_contexts = []
+    all_sources = {}
+    for i, session_id in enumerate(session_ids):
+        try:
+            collection = client.get_collection(session_id)
+        except Exception:
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        results = collection.query(query_embeddings=question_embedding, n_results=3)
+        chunks = results["documents"][0]
+        label = f"PAPER {chr(65 + i)}"  # PAPER A, PAPER B, PAPER C, etc.
+        context = "\n\n".join(chunks)
+        all_contexts.append(f"{label}:\n{context}")
+        all_sources[label] = chunks
+    combined_context = "\n\n---\n\n".join(all_contexts)
+    prompt = f"""Compare the following {len(session_ids)} papers based on the question asked.
+
+{combined_context}
+Question: {question}
+Provide a clear comparison, explicitly referencing what each paper says by its label (PAPER A, PAPER B, etc.)."""
+    response = groq_client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[{
+            "role": "system",
+            "content": "You are a research assistant skilled at comparing multiple academic papers. Be specific about which paper each point comes from."
+        }, {
+            "role": "user",
+            "content": prompt
+        }]
+    )
+    return {
+        "question": question,
+        "papers_compared": len(session_ids),
+        "comparison": response.choices[0].message.content,
+        "sources": all_sources
+    }
