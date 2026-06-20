@@ -84,12 +84,20 @@ async def upload_paper(file:UploadFile=File(...)):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
     file_bytes = await file.read()
+    MAX_FILE_SIZE=10*1024*1024 #10 mb limit
+    if len(file_bytes)>MAX_FILE_SIZE:
+        raise HTTPException(status_code=413,detail="File too large,Maximum size is 10MB")
     text = read_pdf_bytes(file_bytes)
 
     if not text.strip():
         raise HTTPException(status_code=400, detail="Could not extract text from this PDF")
-
+    text=read_pdf_bytes(file_bytes)
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Could not extract text from this PDF")
     chunks = chunk_text(text)
+    MAX_CHUNKS = 200 
+    if len(chunks) > MAX_CHUNKS:
+        raise HTTPException(status_code=413, detail="Document too long to process. Maximum ~200 chunks supported")
     session_id = str(uuid.uuid4())
     collection = store_chunks(chunks, session_id)
 
