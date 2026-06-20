@@ -8,6 +8,7 @@ from fastapi import FastAPI,UploadFile,File,HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import io
 from arxiv_search import search_arxiv, download_pdf
+import uuid
 
 load_dotenv()
 app=FastAPI( title="ResearchMate API",
@@ -41,7 +42,7 @@ def chunk_text(text, chunk_size=300, overlap=50):
     return chunks
 
 def store_chunks(chunks, session_id):
-    client = chromadb.Client()
+    client = chromadb.PersistentClient(path="./chroma_data")
     try:
         client.delete_collection(session_id)
     except Exception:
@@ -89,9 +90,8 @@ async def upload_paper(file:UploadFile=File(...)):
         raise HTTPException(status_code=400, detail="Could not extract text from this PDF")
 
     chunks = chunk_text(text)
-    session_id = file.filename.replace(".pdf", "").replace(" ", "_")
+    session_id = str(uuid.uuid4())
     collection = store_chunks(chunks, session_id)
-    sessions[session_id] = collection
 
     return {
         "session_id": session_id,
@@ -102,12 +102,15 @@ async def upload_paper(file:UploadFile=File(...)):
 
 @app.post("/ask")
 def ask(session_id: str, question: str):
-    if session_id not in sessions:
+    client = chromadb.PersistentClient(path="./chroma_data")
+    
+    try:
+        collection = client.get_collection(session_id)
+    except Exception:
         raise HTTPException(status_code=404, detail="Session not found. Upload the paper first.")
-
-    collection = sessions[session_id]
+    
     answer, sources = ask_question(collection, question)
-
+    
     return {
         "answer": answer,
         "sources": sources,
@@ -125,7 +128,7 @@ def search_and_ask(topic:str,question:str):
     if not text.strip():
         raise HTTPException(status_code=400, detail="Could not extract text from the found paper")
     chunks = chunk_text(text)
-    session_id = paper["title"][:30].replace(" ", "_").replace(",", "")
+    session_id = str(uuid.uuid4())
     collection = store_chunks(chunks, session_id)
     sessions[session_id] = collection
     answer, sources = ask_question(collection, question)
