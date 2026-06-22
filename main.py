@@ -9,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import io
 from arxiv_search import search_arxiv, download_pdf
 import uuid
-
+from agent import agent_executor
+from groq import RateLimitError
 load_dotenv()
 app=FastAPI( title="ResearchMate API",
             description="Upload a research paper and ask questions about it, with answers grounded in the actual document.",
@@ -190,3 +191,26 @@ Provide a clear comparison, explicitly referencing what each paper says by its l
         "comparison": response.choices[0].message.content,
         "sources": all_sources
     }
+
+agent_conversations={}
+@app.post("/agent-chat")
+def agent_chat(session_id:str,message:str):
+    if session_id not in agent_conversations:
+        agent_conversations[session_id] = [
+            ("system", "You are a helpful research assistant. When a user asks for 'more info' after a previous answer, do NOT repeat your previous answer. Instead, either ask what specific aspect they want to know more about, or use your tools again with a more specific query.")
+        ]
+    agent_conversations[session_id].append(("human",message))
+    try:
+        result = agent_executor.invoke({"messages": agent_conversations[session_id]})
+        final_message = result["messages"][-1].content
+        
+        if not final_message or len(final_message.strip()) < 10:
+            return {"answer": "I wasn't able to generate a proper answer for that question. Could you try rephrasing it?"}
+        
+        agent_conversations[session_id].append(("ai", final_message))
+        return {"answer": final_message, "session_id": session_id}
+        
+    except RateLimitError:
+        raise HTTPException(status_code=429, detail="We've hit our usage limit for now. Please try again in a few minutes.")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
