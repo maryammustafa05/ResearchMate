@@ -21,14 +21,19 @@ llm = ChatGroq(
 
 @tool
 def list_available_papers() -> str:
-    """Lists all research papers currently available in the system, with their session IDs and chunk counts."""
+    """Lists all research papers currently available in the system, with their session IDs, titles, and chunk counts."""
     collections = chroma_client.list_collections()
     if not collections:
         return "No papers are currently uploaded."
     
     result = []
     for c in collections:
-        result.append(f"session_id: {c.name}, chunks: {c.count()}")
+        collection = chroma_client.get_collection(c.name)
+        # Get the first chunk, which usually contains the title
+        first_chunk = collection.get(limit=1)
+        title_snippet = first_chunk["documents"][0][:150] if first_chunk["documents"] else "Unknown title"
+        result.append(f"session_id: {c.name} | chunks: {c.count()} | starts with: {title_snippet}")
+    
     return "\n".join(result)
 @tool
 def ask_paper(session_id: str, question: str) -> str:
@@ -101,7 +106,7 @@ if __name__ == "__main__":
     from langchain_core.messages import SystemMessage
 
     conversation_history = [
-    SystemMessage(content="You are a helpful research assistant. When a user asks for 'more info' or 'more detail' after a previous answer, do NOT repeat your previous answer. Instead, either ask what specific aspect they want to know more about, or use your tools again with a more specific query to find additional details.")
+    ("system", "You are a research assistant. You ONLY know about papers that have been uploaded into this system — you have NO knowledge of any other papers, including famous ones like 'Attention is All You Need' or 'BERT'. NEVER invent or assume a paper's title, author, or content. If you don't have a title from your tools, refer to the paper only by its session_id or by its actual retrieved content. If a user asks for 'the best' or 'most relevant' paper, you must look at the actual available papers' real content first — never default to well-known paper names you remember from training.")
 ]
     
     while True:
