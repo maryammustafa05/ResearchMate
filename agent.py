@@ -5,11 +5,11 @@ from langchain_groq import ChatGroq
 from langchain.agents import create_agent
 import chromadb
 from fastembed import TextEmbedding
+import uuid
+from rag_core import read_pdf_bytes, chunk_text, store_chunks, embedder, chroma_client
 
 load_dotenv()
 
-embedder = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
-chroma_client = chromadb.PersistentClient(path="./chroma_data")
 
 llm = ChatGroq(
     model="meta-llama/llama-4-scout-17b-16e-instruct",
@@ -94,7 +94,35 @@ def search_all_papers(query: str) -> str:
             findings.append(f"Paper {c.name}: {snippet}")
     
     return "\n\n".join(findings)
-tools = [list_available_papers, ask_paper, compare_two_papers, search_all_papers]
+from arxiv_search import search_arxiv, download_pdf
+@tool
+def search_and_index_arxiv(topic: str) -> str:
+    """Search arXiv for a real paper on a given topic, download it, and index it into the system so it can be asked about. Use this whenever the user wants to FIND a new paper, or asks for papers/suggestions on a topic that isn't already uploaded."""
+    results = search_arxiv(topic, max_results=1)
+    
+    if not results:
+        return f"No papers found on arXiv for the topic '{topic}'."
+    
+    paper = results[0]
+    
+    if "withdrawn" in paper["title"].lower():
+        return f"The top result for '{topic}' was a withdrawn paper. Try rephrasing your search topic."
+    
+    try:
+        pdf_bytes = download_pdf(paper["pdf_url"])
+        text = read_pdf_bytes(pdf_bytes)
+    except Exception:
+        return f"Found a paper titled '{paper['title']}' but couldn't download or read its PDF. It may be unavailable."
+    
+    if not text.strip():
+        return "Found a paper but could not extract its text."
+    
+    chunks = chunk_text(text)
+    session_id = str(uuid.uuid4())
+    store_chunks(chunks, session_id)
+    
+    return f"Found and indexed: \"{paper['title']}\"\nPDF link: {paper['pdf_url']}\nsession_id: {session_id} ({len(chunks)} chunks)\n\nYou can now ask questions about this paper using its session_id."
+tools = [list_available_papers, ask_paper, compare_two_papers, search_all_papers,search_and_index_arxiv]
 
 agent_executor = create_agent(llm, tools)
 
@@ -106,7 +134,7 @@ if __name__ == "__main__":
     from langchain_core.messages import SystemMessage
 
     conversation_history = [
-    ("system", "You are a research assistant. You ONLY know about papers that have been uploaded into this system — you have NO knowledge of any other papers, including famous ones like 'Attention is All You Need' or 'BERT'. NEVER invent or assume a paper's title, author, or content. If you don't have a title from your tools, refer to the paper only by its session_id or by its actual retrieved content. If a user asks for 'the best' or 'most relevant' paper, you must look at the actual available papers' real content first — never default to well-known paper names you remember from training.")
+    ("system", "You are a research assistant. You ONLY know about papers that have been uploaded or indexed into this system — you have NO knowledge of any other papers, including famous ones from your training data. NEVER invent a paper's title or content. If a user asks to find papers on a topic that isn't already available, use the search_and_index_arxiv tool to find and index a REAL paper before answering. Never substitute a well-known paper name you remember from training. When you find or reference a paper, ALWAYS include its real title and PDF link in your response if available — do not omit them even if you think the user only wants the session_id. NEVER generate fake tool results or pretend you called a tool when you did not. If you don't have specific information (like a PDF link) from an actual previous tool call in this conversation, say so honestly — do not search again or invent a new paper unless the user explicitly asks for a different one.")
 ]
     
     while True:

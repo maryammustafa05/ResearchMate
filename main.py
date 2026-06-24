@@ -11,6 +11,7 @@ from arxiv_search import search_arxiv, download_pdf
 import uuid
 from agent import agent_executor
 from groq import RateLimitError
+from rag_core import read_pdf_bytes, chunk_text, store_chunks, embedder, chroma_client
 load_dotenv()
 app=FastAPI( title="ResearchMate API",
             description="Upload a research paper and ask questions about it, with answers grounded in the actual document.",
@@ -21,40 +22,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
-embedder = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
 groq_client=Groq(api_key=os.getenv("GROQ_API_KEY"))
 sessions={}
 
-def read_pdf_bytes(file_bytes):
-    reader = PdfReader(io.BytesIO(file_bytes))
-    text = ""
-    for page in reader.pages:
-        text += page.extract_text()
-    return text
-
-def chunk_text(text, chunk_size=300, overlap=50):
-    words = text.split()
-    chunks = []
-    i = 0
-    while i < len(words):
-        chunk = " ".join(words[i:i + chunk_size])
-        chunks.append(chunk)
-        i += chunk_size - overlap
-    return chunks
-
-def store_chunks(chunks, session_id):
-    client = chromadb.PersistentClient(path="./chroma_data")
-    try:
-        client.delete_collection(session_id)
-    except Exception:
-        pass
-    collection = client.create_collection(session_id)
-
-    embeddings = list(embedder.embed(chunks))
-    embeddings = [e.tolist() for e in embeddings]
-    ids = [f"chunk_{i}" for i in range(len(chunks))]
-    collection.add(documents=chunks, embeddings=embeddings, ids=ids)
-    return collection
 
 def ask_question(collection, question):
     question_embedding = list(embedder.embed([question]))
@@ -113,10 +83,8 @@ async def upload_paper(file: UploadFile = File(...), user_id: str = "anonymous")
 
 @app.post("/ask")
 def ask(session_id: str, question: str):
-    client = chromadb.PersistentClient(path="./chroma_data")
-    
     try:
-        collection = client.get_collection(session_id)
+        collection = chroma_client.get_collection(session_id)
     except Exception:
         raise HTTPException(status_code=404, detail="Session not found. Upload the paper first.")
     
@@ -153,14 +121,13 @@ def search_and_ask(topic:str,question:str):
     }
 @app.post("/compare")
 def compare_papers(session_ids: list[str], question: str):
-    client = chromadb.PersistentClient(path="./chroma_data")
     question_embedding = list(embedder.embed([question]))
     question_embedding = [e.tolist() for e in question_embedding]
     all_contexts = []
     all_sources = {}
     for i, session_id in enumerate(session_ids):
         try:
-            collection = client.get_collection(session_id)
+            collection = chroma_client.get_collection(session_id)
         except Exception:
             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
         results = collection.query(query_embeddings=question_embedding, n_results=3)
@@ -197,9 +164,10 @@ agent_conversations={}
 def agent_chat(session_id:str,message:str):
     if session_id not in agent_conversations:
         agent_conversations[session_id] = [
-            ("system", "You are a helpful research assistant. When a user asks for 'more info' after a previous answer, do NOT repeat your previous answer. Instead, either ask what specific aspect they want to know more about, or use your tools again with a more specific query.")
-        ]
+             ("system", "You are a research assistant. You ONLY know about papers that have been uploaded or indexed into this system — you have NO knowledge of any other papers, including famous ones from your training data. NEVER invent a paper's title or content. If a user asks to find papers on a topic that isn't already available, use the search_and_index_arxiv tool to find and index a REAL paper before answering. Never substitute a well-known paper name you remember from training. When you find or reference a paper, ALWAYS include its real title and PDF link in your response if available — do not omit them even if you think the user only wants the session_id. NEVER generate fake tool results or pretend you called a tool when you did not. If you don't have specific information (like a PDF link) from an actual previous tool call in this conversation, say so honestly — do not search again or invent a new paper unless the user explicitly asks for a different one.")
+       ]
     agent_conversations[session_id].append(("human",message))
+    print(f"DEBUG: conversation history length = {len(agent_conversations[session_id])}")
     try:
         result = agent_executor.invoke({"messages": agent_conversations[session_id]})
         final_message = result["messages"][-1].content
