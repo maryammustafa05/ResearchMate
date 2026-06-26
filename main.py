@@ -102,6 +102,7 @@ async def upload_paper(file: UploadFile = File(...), user_id: str = "anonymous")
     CURRENT_SESSION_ID = session_id
     CURRENT_PAPER_TITLE = paper_title
     return {
+     "session_id": session_id,
     "paper_title": paper_title,
     "user_id": user_id,
     "message": f"Paper '{paper_title}' uploaded and processed into {len(chunks)} chunks",

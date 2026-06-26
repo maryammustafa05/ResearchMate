@@ -19,8 +19,22 @@ llm = ChatGroq(
     max_retries=1,
     timeout=20
 )
-
-
+@tool
+def check_citation(session_id: str, claim: str) -> str:
+    """Verify whether a specific claim or citation is actually supported by a paper's content. Use this when a user wants to fact-check a sentence they wrote against a source paper, NOT for general questions about the paper."""
+    try:
+        collection = chroma_client.get_collection(session_id)
+    except Exception:
+        return f"Error: No paper found with session_id {session_id}"
+    
+    claim_embedding = list(embedder.embed([claim]))
+    claim_embedding = [e.tolist() for e in claim_embedding]
+    
+    results = collection.query(query_embeddings=claim_embedding, n_results=3)
+    chunks = results["documents"][0]
+    context = "\n\n".join(chunks)
+    
+    return f"CLAIM TO VERIFY: {claim}\n\nMOST RELEVANT PAPER CONTENT FOUND:\n{context}\n\nBased on this content, judge whether the claim is: SUPPORTED (matches the paper), CONTRADICTED (paper says something different), or NOT FOUND (paper doesn't address this). Be specific about what the paper actually says if there's a discrepancy."
 @tool
 def list_available_papers() -> str:
     """Lists all research papers currently available in the system, with their session IDs, titles, and chunk counts."""
@@ -291,7 +305,7 @@ def ask_current_paper(question: str) -> str:
         "session_id": CURRENT_SESSION_ID,
         "question": question
     })
-tools = [list_available_papers, ask_paper, compare_two_papers, search_all_papers,search_and_index_arxiv,find_session_by_name,ask_current_paper]
+tools = [list_available_papers, ask_paper, compare_two_papers, search_all_papers,search_and_index_arxiv,find_session_by_name,ask_current_paper,check_citation]
 
 agent_executor = create_agent(
     model=llm,
@@ -313,6 +327,7 @@ Actually call the tool.
 
 If the user asks a follow-up question about the current paper,
 call ask_current_paper.
+Use check_citation when a user wants to verify whether a specific claim, statistic, or quote they wrote is actually accurate according to a paper — this is different from just answering a question about the paper.
 """
 )
 
