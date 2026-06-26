@@ -305,7 +305,28 @@ def ask_current_paper(question: str) -> str:
         "session_id": CURRENT_SESSION_ID,
         "question": question
     })
-tools = [list_available_papers, ask_paper, compare_two_papers, search_all_papers,search_and_index_arxiv,find_session_by_name,ask_current_paper,check_citation]
+@tool
+def find_research_gaps(topic: str) -> str:
+    """Analyze all uploaded papers on a topic and identify what aspects or subtopics are NOT covered, which a thorough literature review on this topic would typically address. Use this when a user wants to know what might be missing from their collection of papers."""
+    collections = chroma_client.list_collections()
+    if not collections:
+        return "No papers are currently available to analyze."
+    
+    topic_embedding = list(embedder.embed([topic]))
+    topic_embedding = [e.tolist() for e in topic_embedding]
+    
+    all_coverage = []
+    for c in collections:
+        collection = chroma_client.get_collection(c.name)
+        results = collection.query(query_embeddings=topic_embedding, n_results=2)
+        if results["documents"][0]:
+            snippet = " ".join(results["documents"][0])[:400]
+            all_coverage.append(snippet)
+    
+    combined_coverage = "\n\n---\n\n".join(all_coverage)
+    
+    return f"TOPIC: {topic}\n\nWHAT THE CURRENT PAPERS COVER (based on retrieved excerpts):\n{combined_coverage}\n\nBased ONLY on what's shown above, identify 2-3 specific subtopics or angles related to '{topic}' that these excerpts do NOT address. Be specific and modest in your claims — say 'the provided excerpts don't mention X' rather than asserting with certainty that the full papers never discuss it, since you're only seeing retrieved snippets, not complete documents."
+tools = [list_available_papers, ask_paper, compare_two_papers, search_all_papers,search_and_index_arxiv,find_session_by_name,ask_current_paper,check_citation,find_research_gaps]
 
 agent_executor = create_agent(
     model=llm,
