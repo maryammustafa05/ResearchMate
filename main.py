@@ -200,6 +200,12 @@ def agent_chat(session_id: str, message: str):
         
         # HARD VERIFICATION: extract any session_id mentioned and confirm it actually exists
         import re
+
+        final_message = re.sub(
+           r'【\d+†L\d+(?:-L\d+)?】',
+              '',
+           final_message
+         )
         mentioned_ids = re.findall(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', final_message)
         real_ids = {c.name for c in chroma_client.list_collections()}
         

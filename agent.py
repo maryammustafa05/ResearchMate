@@ -279,8 +279,10 @@ def ask_current_paper(question: str) -> str:
     """
     Ask a question about the currently selected paper.
     """
-
     global CURRENT_SESSION_ID
+    print("===== ASK_CURRENT_PAPER CALLED =====")
+    print("CURRENT_SESSION_ID =", CURRENT_SESSION_ID)
+    print("QUESTION =", question)
 
     if CURRENT_SESSION_ID is None:
         return "No paper is currently selected."
