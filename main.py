@@ -12,6 +12,8 @@ import uuid
 from agent import agent_executor
 from groq import RateLimitError
 from rag_core import read_pdf_bytes, chunk_text, store_chunks, embedder, chroma_client
+CURRENT_SESSION_ID = None
+CURRENT_PAPER_TITLE = None
 load_dotenv()
 app=FastAPI( title="ResearchMate API",
             description="Upload a research paper and ask questions about it, with answers grounded in the actual document.",
@@ -25,6 +27,18 @@ app.add_middleware(
 groq_client=Groq(api_key=os.getenv("GROQ_API_KEY"))
 sessions={}
 
+@app.get("/sessions")
+def list_sessions():
+    collections = chroma_client.list_collections()
+    
+    session_list = []
+    for collection in collections:
+        session_list.append({
+            "session_id": collection.name,
+            "chunk_count": collection.count()
+        })
+    
+    return {"sessions": session_list}
 
 def ask_question(collection, question):
     question_embedding = list(embedder.embed([question]))
@@ -72,15 +86,27 @@ async def upload_paper(file: UploadFile = File(...), user_id: str = "anonymous")
         raise HTTPException(status_code=413, detail="Document too long to process. Maximum ~200 chunks supported")
 
     session_id = str(uuid.uuid4())
-    collection = store_chunks(chunks, session_id)
 
+    paper_title = file.filename.replace(".pdf", "")
+    pdf_url = "uploaded_file"
+
+    collection = store_chunks(
+    chunks,
+    session_id,
+    paper_title,
+    pdf_url
+)
+    global CURRENT_SESSION_ID
+    global CURRENT_PAPER_TITLE
+
+    CURRENT_SESSION_ID = session_id
+    CURRENT_PAPER_TITLE = paper_title
     return {
-        "session_id": session_id,
-        "user_id": user_id,
-        "message": f"Paper uploaded and processed into {len(chunks)} chunks",
-        "chunk_count": len(chunks)
-    }
-
+    "paper_title": paper_title,
+    "user_id": user_id,
+    "message": f"Paper '{paper_title}' uploaded and processed into {len(chunks)} chunks",
+    "chunk_count": len(chunks)
+}
 @app.post("/ask")
 def ask(session_id: str, question: str):
     try:
@@ -161,16 +187,25 @@ Provide a clear comparison, explicitly referencing what each paper says by its l
 
 agent_conversations={}
 @app.post("/agent-chat")
-def agent_chat(session_id:str,message:str):
+def agent_chat(session_id: str, message: str):
     if session_id not in agent_conversations:
         agent_conversations[session_id] = [
-             ("system", "You are a research assistant. You ONLY know about papers that have been uploaded or indexed into this system — you have NO knowledge of any other papers, including famous ones from your training data. NEVER invent a paper's title or content. If a user asks to find papers on a topic that isn't already available, use the search_and_index_arxiv tool to find and index a REAL paper before answering. Never substitute a well-known paper name you remember from training. When you find or reference a paper, ALWAYS include its real title and PDF link in your response if available — do not omit them even if you think the user only wants the session_id. NEVER generate fake tool results or pretend you called a tool when you did not. If you don't have specific information (like a PDF link) from an actual previous tool call in this conversation, say so honestly — do not search again or invent a new paper unless the user explicitly asks for a different one.")
-       ]
-    agent_conversations[session_id].append(("human",message))
-    print(f"DEBUG: conversation history length = {len(agent_conversations[session_id])}")
+            ("system", "You are a research assistant. You ONLY know about papers that have been uploaded or indexed into this system — you have NO knowledge of any other papers, including famous ones from your training data. NEVER invent a paper's title or content. If a user asks to find papers on a topic that isn't already available, use the search_and_index_arxiv tool to find and index a REAL paper before answering. Never substitute a well-known paper name you remember from training. When you find or reference a paper, ALWAYS include its real title and PDF link in your response if available — do not omit them even if you think the user only wants the session_id. NEVER generate fake tool results or pretend you called a tool when you did not. If you don't have specific information (like a PDF link) from an actual previous tool call in this conversation, say so honestly — do not search again or invent a new paper unless the user explicitly asks for a different one,NEVER mention, display, or reference session_ids in your responses to the user — they are internal implementation details. Refer to papers only by their title or topic. Session_ids are for your internal tool use only, never for the user to see.")
+        ]
+    agent_conversations[session_id].append(("human", message))
+    
     try:
         result = agent_executor.invoke({"messages": agent_conversations[session_id]})
         final_message = result["messages"][-1].content
+        
+        # HARD VERIFICATION: extract any session_id mentioned and confirm it actually exists
+        import re
+        mentioned_ids = re.findall(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', final_message)
+        real_ids = {c.name for c in chroma_client.list_collections()}
+        
+        fake_ids = [mid for mid in mentioned_ids if mid not in real_ids]
+        if fake_ids:
+            final_message = "I wasn't able to verify a real paper for that request. Could you try asking again, perhaps with a more specific topic?"
         
         if not final_message or len(final_message.strip()) < 10:
             return {"answer": "I wasn't able to generate a proper answer for that question. Could you try rephrasing it?"}

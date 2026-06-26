@@ -26,14 +26,33 @@ def chunk_text(text, chunk_size=300, overlap=50):
     return chunks
 
 
-def store_chunks(chunks, session_id):
+def store_chunks(chunks, session_id, paper_title, pdf_url):
     try:
         chroma_client.delete_collection(session_id)
     except Exception:
         pass
+
     collection = chroma_client.create_collection(session_id)
+
     embeddings = list(embedder.embed(chunks))
     embeddings = [e.tolist() for e in embeddings]
+
     ids = [f"chunk_{i}" for i in range(len(chunks))]
-    collection.add(documents=chunks, embeddings=embeddings, ids=ids)
+
+    metadata = []
+
+    for i, chunk in enumerate(chunks):
+        metadata.append({
+            "chunk_id": i,
+            "title": paper_title,
+            "pdf_url": pdf_url
+        })
+
+    collection.add(
+        documents=chunks,
+        embeddings=embeddings,
+        metadatas=metadata,
+        ids=ids
+    )
+
     return collection

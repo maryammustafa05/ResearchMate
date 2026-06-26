@@ -1,3 +1,5 @@
+CURRENT_SESSION_ID = None
+CURRENT_PAPER_TITLE = None
 import os
 from dotenv import load_dotenv
 from langchain_core.tools import tool
@@ -12,7 +14,7 @@ load_dotenv()
 
 
 llm = ChatGroq(
-    model="meta-llama/llama-4-scout-17b-16e-instruct",
+    model="openai/gpt-oss-120b",
     api_key=os.getenv("GROQ_API_KEY"),
     max_retries=1,
     timeout=20
@@ -37,20 +39,124 @@ def list_available_papers() -> str:
     return "\n".join(result)
 @tool
 def ask_paper(session_id: str, question: str) -> str:
-    """Answer a question about a specific paper using its session_id. Use this when the user wants information from ONE specific paper."""
+    """
+    Answer a question about a specific paper using its session_id.
+    Use this when the user wants information from ONE specific paper.
+    """
+    print("===== ASK_PAPER CALLED =====")
+    print("SESSION ID RECEIVED:", session_id)
     try:
         collection = chroma_client.get_collection(session_id)
     except Exception:
         return f"Error: No paper found with session_id {session_id}"
-    
+
+    # Embed user question
     question_embedding = list(embedder.embed([question]))
     question_embedding = [e.tolist() for e in question_embedding]
-    
-    results = collection.query(query_embeddings=question_embedding, n_results=3)
+    print("COLLECTION COUNT:", collection.count())
+    # Retrieve relevant chunks
+    results = collection.query(
+        query_embeddings=question_embedding,
+        n_results=5
+    )
+    print("\n===== RETRIEVED RESULTS =====")
+    print(results)
+
+    if not results.get("documents") or not results["documents"][0]:
+        return "No relevant information found in the paper."
+
     chunks = results["documents"][0]
-    context = "\n\n".join(chunks)
-    
-    return f"Relevant context from paper:\n{context}"
+
+    # Metadata may not exist for older collections
+    metadata_results = results.get("metadatas")
+
+    if metadata_results and len(metadata_results) > 0:
+        metadata_list = metadata_results[0]
+    else:
+        metadata_list = []
+
+    response_parts = []
+
+    # Default paper info
+    paper_title = "Unknown Title"
+    pdf_url = "Unknown PDF"
+
+    # Safely extract title and PDF
+    if (
+        metadata_list
+        and len(metadata_list) > 0
+        and metadata_list[0] is not None
+    ):
+        paper_title = metadata_list[0].get(
+            "title",
+            "Unknown Title"
+        )
+
+        pdf_url = metadata_list[0].get(
+            "pdf_url",
+            "Unknown PDF"
+        )
+
+    response_parts.append(
+        f"""PAPER TITLE:
+         {paper_title}
+
+        PDF:
+        {pdf_url}
+        """
+    )
+
+    response_parts.append(
+        f"""
+    USER QUESTION:
+         {question}
+
+    RETRIEVED EVIDENCE:
+    """
+    )
+
+    # Add retrieved chunks
+    for i, chunk in enumerate(chunks):
+
+        chunk_id = "Unknown"
+
+        if (
+            metadata_list
+            and i < len(metadata_list)
+            and metadata_list[i] is not None
+        ):
+            chunk_id = metadata_list[i].get(
+                "chunk_id",
+                "Unknown"
+            )
+
+        response_parts.append(
+            f"""
+        ----- SOURCE CHUNK {i + 1} -----
+        Chunk ID: {chunk_id}
+
+         {chunk}
+           """
+        )
+
+    response_parts.append(
+        """
+INSTRUCTIONS FOR THE ASSISTANT:
+
+- Answer ONLY using the retrieved evidence above.
+- Do NOT use outside knowledge.
+- Do NOT guess.
+- If the evidence is insufficient, say:
+  "The retrieved sections do not contain enough information to answer that question."
+- Cite which source chunks support your answer.
+"""
+    )
+    final_response = "\n".join(response_parts)
+
+    print("\n===== TOOL RETURN =====")
+    print(final_response[:3000])
+
+    return "\n".join(response_parts)
 
 @tool
 def compare_two_papers(session_id_1: str, session_id_2: str, aspect: str) -> str:
@@ -97,13 +203,34 @@ def search_all_papers(query: str) -> str:
 from arxiv_search import search_arxiv, download_pdf
 @tool
 def search_and_index_arxiv(topic: str) -> str:
-    """Search arXiv for a real paper on a given topic, download it, and index it into the system so it can be asked about. Use this whenever the user wants to FIND a new paper, or asks for papers/suggestions on a topic that isn't already uploaded."""
+    """
+    MANDATORY TOOL.
+
+    Call this tool whenever the user:
+    - asks for a paper
+    - asks for a research paper
+    - asks for a paper recommendation
+    - asks for a PDF link
+    - asks for an NLP paper
+    - asks for an AI paper
+    - asks to search arXiv
+
+    Never answer such requests without calling this tool first."""
+    
     results = search_arxiv(topic, max_results=1)
     
     if not results:
         return f"No papers found on arXiv for the topic '{topic}'."
     
     paper = results[0]
+    
+    # Check if we already have a paper with this exact title indexed
+    existing_collections = chroma_client.list_collections()
+    for c in existing_collections:
+        collection = chroma_client.get_collection(c.name)
+        first_chunk = collection.get(limit=1)
+        if first_chunk["documents"] and paper["title"][:50].lower() in first_chunk["documents"][0][:300].lower():
+            return f"This paper is already indexed: \"{paper['title']}\"\nPDF link: {paper['pdf_url']}\nsession_id: {c.name}\n\nYou can ask questions about it using this session_id."
     
     if "withdrawn" in paper["title"].lower():
         return f"The top result for '{topic}' was a withdrawn paper. Try rephrasing your search topic."
@@ -119,12 +246,73 @@ def search_and_index_arxiv(topic: str) -> str:
     
     chunks = chunk_text(text)
     session_id = str(uuid.uuid4())
-    store_chunks(chunks, session_id)
-    
-    return f"Found and indexed: \"{paper['title']}\"\nPDF link: {paper['pdf_url']}\nsession_id: {session_id} ({len(chunks)} chunks)\n\nYou can now ask questions about this paper using its session_id."
-tools = [list_available_papers, ask_paper, compare_two_papers, search_all_papers,search_and_index_arxiv]
+    global CURRENT_SESSION_ID
+    global CURRENT_PAPER_TITLE
 
-agent_executor = create_agent(llm, tools)
+    CURRENT_SESSION_ID = session_id
+    CURRENT_PAPER_TITLE = paper["title"]
+    store_chunks(chunks,
+    session_id,
+    paper["title"],
+    paper["pdf_url"])
+    
+    return f"Found and indexed paper: Title: {paper['title']} PDF: {paper['pdf_url']}, You can now ask questions about this paper."
+@tool
+def find_session_by_name(paper_name: str) -> str:
+    """Find a paper's session_id by matching part of its name or title. Use this internally when a user refers to a paper by name instead of session_id."""
+    print("===== FIND_SESSION_BY_NAME CALLED =====")
+    collections = chroma_client.list_collections()
+    for c in collections:
+        collection = chroma_client.get_collection(c.name)
+        first_chunk = collection.get(limit=1)
+        meta = first_chunk.get("metadatas")
+
+        if meta and meta[0]:
+           title_snippet = meta[0].get("title", "")
+        else:
+           title_snippet = ""
+        if paper_name.lower() in title_snippet.lower():
+            return c.name
+    return None
+@tool
+def ask_current_paper(question: str) -> str:
+    """
+    Ask a question about the currently selected paper.
+    """
+
+    global CURRENT_SESSION_ID
+
+    if CURRENT_SESSION_ID is None:
+        return "No paper is currently selected."
+
+    return ask_paper.invoke({
+        "session_id": CURRENT_SESSION_ID,
+        "question": question
+    })
+tools = [list_available_papers, ask_paper, compare_two_papers, search_all_papers,search_and_index_arxiv,find_session_by_name,ask_current_paper]
+
+agent_executor = create_agent(
+    model=llm,
+    tools=tools,
+    system_prompt="""
+You are ResearchMate.
+
+IMPORTANT:
+
+If the user mentions any paper title,
+ALWAYS call find_session_by_name.
+
+Never invent session IDs.
+
+Never write
+${find_session_by_name(...)}.
+
+Actually call the tool.
+
+If the user asks a follow-up question about the current paper,
+call ask_current_paper.
+"""
+)
 
 from groq import RateLimitError
 
@@ -134,7 +322,52 @@ if __name__ == "__main__":
     from langchain_core.messages import SystemMessage
 
     conversation_history = [
-    ("system", "You are a research assistant. You ONLY know about papers that have been uploaded or indexed into this system — you have NO knowledge of any other papers, including famous ones from your training data. NEVER invent a paper's title or content. If a user asks to find papers on a topic that isn't already available, use the search_and_index_arxiv tool to find and index a REAL paper before answering. Never substitute a well-known paper name you remember from training. When you find or reference a paper, ALWAYS include its real title and PDF link in your response if available — do not omit them even if you think the user only wants the session_id. NEVER generate fake tool results or pretend you called a tool when you did not. If you don't have specific information (like a PDF link) from an actual previous tool call in this conversation, say so honestly — do not search again or invent a new paper unless the user explicitly asks for a different one.")
+(
+"system",
+"""
+You are ResearchMate, a research-paper assistant.
+
+IMPORTANT RULES:
+
+1. You ONLY know information that comes from:
+   - uploaded papers
+   - indexed papers
+   - tool outputs
+
+2. NEVER use your own knowledge about papers.
+
+3. If information is not present in retrieved context, say:
+   "The retrieved sections do not contain enough information to answer that."
+
+4. NEVER guess methodology, datasets, results, or conclusions.
+
+5. When answering:
+   - quote relevant evidence from retrieved chunks
+   - provide a concise answer
+   - mention which section/chunk the answer came from if available
+
+6. If a user asks for a paper recommendation:
+   ALWAYS use search_and_index_arxiv.
+
+7. If a user mentions a paper by name:
+   first find the paper using find_session_by_name.
+
+8. Session IDs are internal.
+   Never display them to users.
+
+9. If multiple papers exist with similar names,
+   ask the user which one they mean.
+
+10. Every answer must be grounded in retrieved content.
+11. When a user asks a follow-up question such as:
+- What dataset was used?
+- Summarize the paper
+- What methodology was used?
+- What were the results?
+
+Always use ask_current_paper unless the user explicitly names a different paper.
+"""
+)
 ]
     
     while True:
@@ -157,4 +390,8 @@ if __name__ == "__main__":
         except RateLimitError:
             print("\nAgent: We've hit our usage limit for now. Please try again in a few minutes.\n")
         except Exception as e:
-            print(f"\nAgent: Something went wrong while processing your request. Please try again.\n")
+          import traceback
+
+          print("\n===== ERROR =====")
+          traceback.print_exc()
+          print("=================\n")
