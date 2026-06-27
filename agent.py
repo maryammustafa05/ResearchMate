@@ -336,10 +336,10 @@ def find_research_gaps(topic: str) -> str:
     
     return f"TOPIC: {topic}\n\nWHAT THE CURRENT PAPERS COVER (based on excerpts from {papers_with_content} papers):\n{combined_coverage}\n\nBased ONLY on what's shown above, identify 2-3 specific subtopics or angles related to '{topic}' that these excerpts do NOT address collectively. Be specific and modest — say 'the provided excerpts don't mention X' rather than asserting certainty, since you're only seeing retrieved snippets, not complete documents. Do NOT summarize what any single paper says about its own limitations — focus only on what's missing ACROSS the full set of excerpts."
 researcher_tools=[list_available_papers,ask_paper,compare_two_papers,search_all_papers,search_and_index_arxiv,find_session_by_name,ask_current_paper]
-citation_tools=[check_citation]
+citation_tools=[check_citation,find_session_by_name]
 gap_tools=[find_research_gaps]
 researcher_agent=create_agent(model=llm,tools=researcher_tools,system_prompt="You are the Researcher. Find, retrieve, and compare papers. Never mention session_ids to the user.")
-citation_agent = create_agent(model=llm, tools=citation_tools, system_prompt="You are the Citation Checker. Verify claims against paper content. Be precise about supported vs contradicted vs not found.")
+citation_agent = create_agent(model=llm, tools=citation_tools, system_prompt="You are the Citation Checker. First use find_session_by_name to resolve a paper name into a session_id, then use check_citation to verify claims against that paper's content. Be precise about supported vs contradicted vs not found. Never display session_ids to the user.")
 gap_agent = create_agent(model=llm, tools=gap_tools, system_prompt="You are the Gap Finder. Identify missing research angles. Always hedge based on retrieved excerpts only.")
 
 def supervisor_router(state):
