@@ -343,11 +343,23 @@ citation_agent = create_agent(model=llm, tools=citation_tools, system_prompt="Yo
 gap_agent = create_agent(model=llm, tools=gap_tools, system_prompt="You are the Gap Finder. Identify missing research angles. Always hedge based on retrieved excerpts only.")
 
 def supervisor_router(state):
-    last_message = state["messages"][-1].content.lower() if state["messages"] else ""
+    last_message = state["messages"][-1].content if state["messages"] else ""
     
-    if "check" in last_message and ("claim" in last_message or "citation" in last_message or "verify" in last_message):
+    classification_prompt = f"""Classify this user request into exactly one category:
+- "citation_checker" — if the user wants to verify/fact-check a specific claim, statistic, or statement against a paper
+- "gap_finder" — if the user wants to know what's missing, uncovered, or absent from their papers on a topic
+- "researcher" — for everything else (asking questions, searching, comparing papers)
+
+User request: "{last_message}"
+
+Respond with ONLY one word: citation_checker, gap_finder, or researcher"""
+
+    response = llm.invoke(classification_prompt)
+    category = response.content.strip().lower()
+    
+    if "citation" in category:
         return "citation_checker"
-    if "gap" in last_message or "missing" in last_message:
+    if "gap" in category:
         return "gap_finder"
     return "researcher"
 def call_researcher(state):
