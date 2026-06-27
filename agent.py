@@ -9,7 +9,7 @@ import chromadb
 from fastembed import TextEmbedding
 import uuid
 from rag_core import read_pdf_bytes, chunk_text, store_chunks, embedder, chroma_client
-
+from langgraph.graph import StateGraph,END,MessagesState
 load_dotenv()
 
 
@@ -316,16 +316,73 @@ def find_research_gaps(topic: str) -> str:
     topic_embedding = [e.tolist() for e in topic_embedding]
     
     all_coverage = []
+    papers_with_content = 0
+    
     for c in collections:
         collection = chroma_client.get_collection(c.name)
         results = collection.query(query_embeddings=topic_embedding, n_results=2)
         if results["documents"][0]:
             snippet = " ".join(results["documents"][0])[:400]
             all_coverage.append(snippet)
+            papers_with_content += 1
     
     combined_coverage = "\n\n---\n\n".join(all_coverage)
     
-    return f"TOPIC: {topic}\n\nWHAT THE CURRENT PAPERS COVER (based on retrieved excerpts):\n{combined_coverage}\n\nBased ONLY on what's shown above, identify 2-3 specific subtopics or angles related to '{topic}' that these excerpts do NOT address. Be specific and modest in your claims — say 'the provided excerpts don't mention X' rather than asserting with certainty that the full papers never discuss it, since you're only seeing retrieved snippets, not complete documents."
+    if papers_with_content <= 1:
+        return (f"Only {papers_with_content} paper in the system has content relevant to '{topic}'. "
+                f"Gap analysis is most meaningful when comparing multiple papers — with just one source, "
+                f"I can't reliably identify field-wide gaps, only note what this single paper doesn't cover. "
+                f"Would you like me to search for additional papers on '{topic}' first, so we have more to compare?")
+    
+    return f"TOPIC: {topic}\n\nWHAT THE CURRENT PAPERS COVER (based on excerpts from {papers_with_content} papers):\n{combined_coverage}\n\nBased ONLY on what's shown above, identify 2-3 specific subtopics or angles related to '{topic}' that these excerpts do NOT address collectively. Be specific and modest — say 'the provided excerpts don't mention X' rather than asserting certainty, since you're only seeing retrieved snippets, not complete documents. Do NOT summarize what any single paper says about its own limitations — focus only on what's missing ACROSS the full set of excerpts."
+researcher_tools=[list_available_papers,ask_paper,compare_two_papers,search_all_papers,search_and_index_arxiv,find_session_by_name,ask_current_paper]
+citation_tools=[check_citation]
+gap_tools=[find_research_gaps]
+researcher_agent=create_agent(model=llm,tools=researcher_tools,system_prompt="You are the Researcher. Find, retrieve, and compare papers. Never mention session_ids to the user.")
+citation_agent = create_agent(model=llm, tools=citation_tools, system_prompt="You are the Citation Checker. Verify claims against paper content. Be precise about supported vs contradicted vs not found.")
+gap_agent = create_agent(model=llm, tools=gap_tools, system_prompt="You are the Gap Finder. Identify missing research angles. Always hedge based on retrieved excerpts only.")
+
+def supervisor_router(state):
+    last_message = state["messages"][-1].content.lower() if state["messages"] else ""
+    
+    if "check" in last_message and ("claim" in last_message or "citation" in last_message or "verify" in last_message):
+        return "citation_checker"
+    if "gap" in last_message or "missing" in last_message:
+        return "gap_finder"
+    return "researcher"
+def call_researcher(state):
+    result = researcher_agent.invoke(state)
+    return result
+
+def call_citation_checker(state):
+    result = citation_agent.invoke(state)
+    return result
+
+def call_gap_finder(state):
+    result = gap_agent.invoke(state)
+    return result
+graph=StateGraph(MessagesState)
+graph.add_node("researcher",call_researcher)
+graph.add_node("citation_checker", call_citation_checker)
+graph.add_node("gap_finder", call_gap_finder)
+graph.set_conditional_entry_point(
+    supervisor_router,
+    {
+        "researcher": "researcher",
+        "citation_checker": "citation_checker",
+        "gap_finder": "gap_finder",
+    }
+)
+
+graph.add_edge("researcher", END)
+graph.add_edge("citation_checker", END)
+graph.add_edge("gap_finder", END)
+supervisor_executor = graph.compile()
+if __name__ == "__main__":
+    test_result = supervisor_executor.invoke({"messages": [("human", "what is the main contribution of the sign language paper")]})
+    print("SUPERVISOR TEST RESULT:")
+    print(test_result["messages"][-1].content)
+
 tools = [list_available_papers, ask_paper, compare_two_papers, search_all_papers,search_and_index_arxiv,find_session_by_name,ask_current_paper,check_citation,find_research_gaps]
 
 agent_executor = create_agent(

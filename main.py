@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import io
 from arxiv_search import search_arxiv, download_pdf
 import uuid
-from agent import agent_executor
+from agent import supervisor_executor
 from groq import RateLimitError
 from rag_core import read_pdf_bytes, chunk_text, store_chunks, embedder, chroma_client
 CURRENT_SESSION_ID = None
@@ -185,6 +185,11 @@ Provide a clear comparison, explicitly referencing what each paper says by its l
         "comparison": response.choices[0].message.content,
         "sources": all_sources
     }
+import re
+
+def clean_response(text):
+    # Remove citation marker artifacts like 【4†L1-L4】
+    return re.sub(r'【[^】]*】', '', text).strip()
 
 agent_conversations={}
 @app.post("/agent-chat")
@@ -196,17 +201,11 @@ def agent_chat(session_id: str, message: str):
     agent_conversations[session_id].append(("human", message))
     
     try:
-        result = agent_executor.invoke({"messages": agent_conversations[session_id]})
-        final_message = result["messages"][-1].content
+        result = supervisor_executor.invoke({"messages": agent_conversations[session_id]})
+        final_message = clean_response(result["messages"][-1].content)
         
         # HARD VERIFICATION: extract any session_id mentioned and confirm it actually exists
-        import re
-
-        final_message = re.sub(
-           r'【\d+†L\d+(?:-L\d+)?】',
-              '',
-           final_message
-         )
+        
         mentioned_ids = re.findall(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', final_message)
         real_ids = {c.name for c in chroma_client.list_collections()}
         
