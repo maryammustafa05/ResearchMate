@@ -67,7 +67,12 @@ def ask_question(collection, question):
 def root():
     return {"message":"ResearchMate API is running. Go to /docs to explore the API."}
 @app.post("/upload")
-async def upload_paper(file: UploadFile = File(...), user_id: str = "anonymous"):
+async def upload_paper(
+    file: UploadFile = File(...),
+    team_id: str = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
@@ -76,6 +81,15 @@ async def upload_paper(file: UploadFile = File(...), user_id: str = "anonymous")
     MAX_FILE_SIZE = 10 * 1024 * 1024
     if len(file_bytes) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="File too large. Maximum size is 10MB")
+
+    # If team_id provided, verify user is actually a member
+    if team_id:
+        membership = db.query(TeamMember).filter(
+            TeamMember.team_id == team_id,
+            TeamMember.user_id == current_user.id
+        ).first()
+        if not membership:
+            raise HTTPException(status_code=403, detail="You are not a member of this team")
 
     text = read_pdf_bytes(file_bytes)
 
@@ -89,28 +103,23 @@ async def upload_paper(file: UploadFile = File(...), user_id: str = "anonymous")
         raise HTTPException(status_code=413, detail="Document too long to process. Maximum ~200 chunks supported")
 
     session_id = str(uuid.uuid4())
-
     paper_title = file.filename.replace(".pdf", "")
-    pdf_url = "uploaded_file"
 
-    collection = store_chunks(
-    chunks,
-    session_id,
-    paper_title,
-    pdf_url
-)
+    collection = store_chunks(chunks, session_id, paper_title, "uploaded_file")
+
     global CURRENT_SESSION_ID
     global CURRENT_PAPER_TITLE
-
     CURRENT_SESSION_ID = session_id
     CURRENT_PAPER_TITLE = paper_title
+
     return {
-     "session_id": session_id,
-    "paper_title": paper_title,
-    "user_id": user_id,
-    "message": f"Paper '{paper_title}' uploaded and processed into {len(chunks)} chunks",
-    "chunk_count": len(chunks)
-}
+        "session_id": session_id,
+        "paper_title": paper_title,
+        "user_id": current_user.id,
+        "team_id": team_id,
+        "message": f"Paper '{paper_title}' uploaded and processed into {len(chunks)} chunks",
+        "chunk_count": len(chunks)
+    }
 @app.post("/ask")
 def ask(session_id: str, question: str):
     try:
@@ -273,22 +282,28 @@ def create_team(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    print(f"Creating team for user: {current_user.id}")
+    
     team = Team(
         name=request.name,
         created_by=current_user.id
     )
     db.add(team)
-    db.commit()  # commit team first so it has a real ID
-    db.refresh(team)  # refresh to get the generated ID
-
+    db.commit()
+    db.refresh(team)
+    
+    print(f"Team created with ID: {team.id}")
+    
     owner_membership = TeamMember(
         team_id=team.id,
         user_id=current_user.id,
         role="owner"
     )
     db.add(owner_membership)
-    db.commit()  # now commit the membership
-
+    db.commit()
+    
+    print(f"Membership added for team: {team.id}")
+    
     return {
         "team_id": team.id,
         "team_name": team.name,
