@@ -261,3 +261,83 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
 @app.get("/me")
 def get_me(current_user: User = Depends(get_current_user)):
     return {"user_id": current_user.id, "email": current_user.email, "full_name": current_user.full_name}
+
+class CreateTeamRequest(BaseModel):
+    name:str
+class InviteRequest(BaseModel):
+    team_id: str
+    email: str
+@app.post("/teams/create")
+def create_team(
+    request: CreateTeamRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    team = Team(
+        name=request.name,
+        created_by=current_user.id
+    )
+    db.add(team)
+    db.commit()  # commit team first so it has a real ID
+    db.refresh(team)  # refresh to get the generated ID
+
+    owner_membership = TeamMember(
+        team_id=team.id,
+        user_id=current_user.id,
+        role="owner"
+    )
+    db.add(owner_membership)
+    db.commit()  # now commit the membership
+
+    return {
+        "team_id": team.id,
+        "team_name": team.name,
+        "created_by": current_user.email,
+        "message": f"Team '{team.name}' created successfully"
+    }
+@app.post("/teams/invite")
+def invite_to_team(request:InviteRequest,current_user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+     # Check the inviter is actually a member of this team
+    membership = db.query(TeamMember).filter(
+        TeamMember.team_id == request.team_id,
+        TeamMember.user_id == current_user.id
+    ).first()
+    if not membership:
+        raise HTTPException(status_code=403, detail="You are not a member of this team")
+    #find the user being invited
+    invited_user = db.query(User).filter(User.email == request.email).first()
+    if not invited_user:
+        raise HTTPException(status_code=404, detail="No user found with that email — they need to sign up first")
+    # Check they're not already a member
+    existing = db.query(TeamMember).filter(
+        TeamMember.team_id == request.team_id,
+        TeamMember.user_id == invited_user.id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="This person is already a member of the team")
+    new_member = TeamMember(
+        team_id=request.team_id,
+        user_id=invited_user.id,
+        role="member"
+    )
+    db.add(new_member)
+    db.commit()
+    return {
+        "message": f"{invited_user.email} has been added to the team",
+        "team_id": request.team_id
+    }
+@app.get("/teams/my-teams")
+def get_my_teams(current_user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    memberships=db.query(TeamMember).filter(TeamMember.user_id==current_user.id).all()
+    teams=[]
+    for m in memberships:
+        team = db.query(Team).filter(Team.id == m.team_id).first()
+        member_count = db.query(TeamMember).filter(TeamMember.team_id == team.id).count()
+        teams.append({
+            "team_id": team.id,
+            "team_name": team.name,
+            "your_role": m.role,
+            "member_count": member_count,
+            "created_at": team.created_at
+        })
+    return {"teams":teams}
