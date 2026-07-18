@@ -11,6 +11,11 @@ import uuid
 from agent import supervisor_executor
 from groq import RateLimitError
 from rag_core import read_pdf_bytes, chunk_text, store_chunks, embed_query, chroma_client
+from database import get_db, User, Team, TeamMember, Base, engine
+from auth import hash_password, verify_password, create_access_token, get_current_user
+from sqlalchemy.orm import Session
+from fastapi import Depends
+from pydantic import BaseModel, EmailStr
 CURRENT_SESSION_ID = None
 CURRENT_PAPER_TITLE = None
 load_dotenv()
@@ -220,3 +225,39 @@ def agent_chat(session_id: str, message: str):
         raise HTTPException(status_code=429, detail="We've hit our usage limit for now. Please try again in a few minutes.")
     except Exception:
         raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    full_name: str
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/signup")
+def signup(request: SignupRequest, db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.email == request.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    user = User(
+        email=request.email,
+        password_hash=hash_password(request.password),
+        full_name=request.full_name
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    
+    token = create_access_token({"sub": user.id})
+    return {"token": token, "user_id": user.id, "email": user.email, "full_name": user.full_name}
+@app.post("/login")
+def login(request: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user or not verify_password(request.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    token = create_access_token({"sub": user.id})
+    return {"token": token, "user_id": user.id, "email": user.email, "full_name": user.full_name}
+@app.get("/me")
+def get_me(current_user: User = Depends(get_current_user)):
+    return {"user_id": current_user.id, "email": current_user.email, "full_name": current_user.full_name}
