@@ -6,9 +6,8 @@ from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 from langchain.agents import create_agent
 import chromadb
-from fastembed import TextEmbedding
 import uuid
-from rag_core import read_pdf_bytes, chunk_text, store_chunks, embedder, chroma_client
+from rag_core import read_pdf_bytes, chunk_text, store_chunks, embed_query, chroma_client
 from langgraph.graph import StateGraph,END,MessagesState
 load_dotenv()
 
@@ -26,9 +25,7 @@ def check_citation(session_id: str, claim: str) -> str:
         collection = chroma_client.get_collection(session_id)
     except Exception:
         return f"Error: No paper found with session_id {session_id}"
-    
-    claim_embedding = list(embedder.embed([claim]))
-    claim_embedding = [e.tolist() for e in claim_embedding]
+    claim_embedding=[embed_query(claim)]
     
     results = collection.query(query_embeddings=claim_embedding, n_results=3)
     chunks = results["documents"][0]
@@ -65,8 +62,7 @@ def ask_paper(session_id: str, question: str) -> str:
         return f"Error: No paper found with session_id {session_id}"
 
     # Embed user question
-    question_embedding = list(embedder.embed([question]))
-    question_embedding = [e.tolist() for e in question_embedding]
+    question_embedding = [embed_query(question)]
     print("COLLECTION COUNT:", collection.count())
     # Retrieve relevant chunks
     results = collection.query(
@@ -181,8 +177,7 @@ def compare_two_papers(session_id_1: str, session_id_2: str, aspect: str) -> str
     except Exception:
         return "Error: One or both session_ids not found"
     
-    question_embedding = list(embedder.embed([aspect]))
-    question_embedding = [e.tolist() for e in question_embedding]
+    question_embedding = [embed_query(aspect)]
     
     results_1 = collection_1.query(query_embeddings=question_embedding, n_results=2)
     results_2 = collection_2.query(query_embeddings=question_embedding, n_results=2)
@@ -202,8 +197,7 @@ def search_all_papers(query: str) -> str:
     if not collections:
         return "No papers are currently available."
     
-    query_embedding = list(embedder.embed([query]))
-    query_embedding = [e.tolist() for e in query_embedding]
+    query_embedding = [embed_query(query)]
     
     findings = []
     for c in collections:
@@ -312,8 +306,7 @@ def find_research_gaps(topic: str) -> str:
     if not collections:
         return "No papers are currently available to analyze."
     
-    topic_embedding = list(embedder.embed([topic]))
-    topic_embedding = [e.tolist() for e in topic_embedding]
+    topic_embedding = [embed_query(topic)]
     
     all_coverage = []
     papers_with_content = 0

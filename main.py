@@ -3,7 +3,6 @@ from dotenv import load_dotenv
 from groq import Groq
 import chromadb
 from pypdf import PdfReader
-from fastembed import TextEmbedding
 from fastapi import FastAPI,UploadFile,File,HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import io
@@ -11,7 +10,7 @@ from arxiv_search import search_arxiv, download_pdf
 import uuid
 from agent import supervisor_executor
 from groq import RateLimitError
-from rag_core import read_pdf_bytes, chunk_text, store_chunks, embedder, chroma_client
+from rag_core import read_pdf_bytes, chunk_text, store_chunks, embed_query, chroma_client
 CURRENT_SESSION_ID = None
 CURRENT_PAPER_TITLE = None
 load_dotenv()
@@ -41,8 +40,7 @@ def list_sessions():
     return {"sessions": session_list}
 
 def ask_question(collection, question):
-    question_embedding = list(embedder.embed([question]))
-    question_embedding = [e.tolist() for e in question_embedding]
+    question_embedding=[embed_query(question)]
     results = collection.query(query_embeddings=question_embedding, n_results=3)
     relevant_chunks = results["documents"][0]
 
@@ -148,8 +146,7 @@ def search_and_ask(topic:str,question:str):
     }
 @app.post("/compare")
 def compare_papers(session_ids: list[str], question: str):
-    question_embedding = list(embedder.embed([question]))
-    question_embedding = [e.tolist() for e in question_embedding]
+    question_embedding=[embed_query(question)]
     all_contexts = []
     all_sources = {}
     for i, session_id in enumerate(session_ids):
