@@ -68,7 +68,7 @@ function Nav() {
           <a href="#how">How it works</a>
           <a href="#features">Capabilities</a>
         </div>
-        <Link to="/app" className="nav-cta">
+        <Link to="/login" className="nav-cta">
           Open the assistant <ArrowRight size={15} />
         </Link>
       </div>
@@ -100,7 +100,7 @@ function Hero() {
         </p>
 
         <div className="hero-actions">
-          <Link to="/app" className="btn-primary">
+          <Link to="/login" className="btn-primary">
             Start asking <ArrowRight size={16} />
           </Link>
           <a href="#how" className="btn-ghost">
@@ -252,7 +252,7 @@ function CTASection() {
       <div className="cta-glow" aria-hidden="true" />
       <h2>Stop re-reading the same paper for the third time today.</h2>
       <p>Upload one now — your first cited answer is a minute away.</p>
-      <Link to="/app" className="btn-primary btn-large">
+      <Link to="/login" className="btn-primary btn-large">
         Open ResearchMate <ArrowRight size={17} />
       </Link>
     </RevealSection>

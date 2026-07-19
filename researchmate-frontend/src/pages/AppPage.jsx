@@ -8,6 +8,13 @@ import './AppPage.css';
 
 const API_BASE = 'http://127.0.0.1:8000';
 
+function getAuthHeaders(){
+  const token=sessionStorage.getItem('token');
+  return{
+    'Authorization': `Bearer ${token}`
+  };
+}
+
 function getSessionId() {
   let id = sessionStorage.getItem('chat_session_id');
   if (!id) {
@@ -52,8 +59,9 @@ export default function AppPage() {
     formData.append('file', file);
 
     try {
-      const res = await fetch(`${API_BASE}/upload?user_id=frontend`, {
+      const res = await fetch(`${API_BASE}/upload`, {
         method: 'POST',
+        headers: getAuthHeaders(),
         body: formData,
       });
       if (!res.ok) throw new Error('Upload failed');
@@ -99,6 +107,7 @@ export default function AppPage() {
     });
     const res = await fetch(`${API_BASE}/agent-chat?${params}`, {
       method: 'POST',
+       headers: getAuthHeaders(),
     });
       if (res.status === 429) {
         setMessages((prev) => [
