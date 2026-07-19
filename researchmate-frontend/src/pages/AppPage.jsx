@@ -6,13 +6,11 @@ import {
 } from 'lucide-react';
 import './AppPage.css';
 
-const API_BASE = 'http://127.0.0.1:8000';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000';
 
-function getAuthHeaders(){
-  const token=sessionStorage.getItem('token');
-  return{
-    'Authorization': `Bearer ${token}`
-  };
+function getAuthHeaders() {
+  const token = sessionStorage.getItem('token');
+  return { 'Authorization': `Bearer ${token}` };
 }
 
 function getSessionId() {
@@ -27,15 +25,23 @@ function getSessionId() {
 export default function AppPage() {
   const [papers, setPapers] = useState([]);
   const [messages, setMessages] = useState([
-    {
-      role: 'agent',
-      text: "Upload a paper, or just tell me a topic and I'll find one for you.",
-    },
+    { role: 'agent', text: "Upload a paper, or just tell me a topic and I'll find one for you." },
   ]);
   const [input, setInput] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState(null);
+
+  // Team state — inside component
+  const [teams, setTeams] = useState([]);
+  const [currentTeam, setCurrentTeam] = useState(null);
+  const [showTeamPanel, setShowTeamPanel] = useState(false);
+  const [teamName, setTeamName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [teamMessage, setTeamMessage] = useState(null);
+
+  const userEmail = sessionStorage.getItem('user_email');
+  const userName = sessionStorage.getItem('user_name');
   const chatEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const sessionId = useRef(getSessionId());
@@ -43,6 +49,66 @@ export default function AppPage() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking]);
+
+  useEffect(() => {
+    loadTeams();
+  }, []);
+
+  async function loadTeams() {
+    try {
+      const res = await fetch(`${API_BASE}/teams/my-teams`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTeams(data.teams);
+        if (data.teams.length > 0) setCurrentTeam(data.teams[0]);
+      }
+    } catch (err) {
+      console.error('Could not load teams');
+    }
+  }
+
+  async function createTeam() {
+    if (!teamName.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE}/teams/create`, {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: teamName }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTeamMessage(`Team "${data.team_name}" created!`);
+        setTeamName('');
+        loadTeams();
+      } else {
+        setTeamMessage(data.detail);
+      }
+    } catch (err) {
+      setTeamMessage('Something went wrong');
+    }
+  }
+
+  async function inviteMember() {
+    if (!inviteEmail.trim() || !currentTeam) return;
+    try {
+      const res = await fetch(`${API_BASE}/teams/invite`, {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ team_id: currentTeam.team_id, email: inviteEmail }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setTeamMessage(`${inviteEmail} added to the team!`);
+        setInviteEmail('');
+      } else {
+        setTeamMessage(data.detail);
+      }
+    } catch (err) {
+      setTeamMessage('Something went wrong');
+    }
+  }
 
   async function handleFileUpload(e) {
     const file = e.target.files[0];
@@ -87,28 +153,28 @@ export default function AppPage() {
   }
 
   async function sendMessage() {
-  const text = input.trim();
-  if (!text || isThinking) return;
+    const text = input.trim();
+    if (!text || isThinking) return;
 
-  setMessages((prev) => [...prev, { role: 'user', text }]);
-  setInput('');
-  setIsThinking(true);
-  setError(null);
+    setMessages((prev) => [...prev, { role: 'user', text }]);
+    setInput('');
+    setIsThinking(true);
+    setError(null);
 
-  // Build context about uploaded papers so the agent doesn't need to ask
-  const paperContext = papers.length > 0
-    ? `\n\n[Context: The user has these papers available - ${papers.map(p => `"${p.name}" (session_id: ${p.sessionId})`).join(', ')}. If they refer to a paper by name, use its session_id automatically without asking them for it.]`
-    : '';
+    const paperContext = papers.length > 0
+      ? `\n\n[Context: The user has these papers available - ${papers.map(p => `"${p.name}" (session_id: ${p.sessionId})`).join(', ')}. If they refer to a paper by name, use its session_id automatically without asking them for it.]`
+      : '';
 
-  try {
-    const params = new URLSearchParams({
-      session_id: sessionId.current,
-      message: text + paperContext,
-    });
-    const res = await fetch(`${API_BASE}/agent-chat?${params}`, {
-      method: 'POST',
-       headers: getAuthHeaders(),
-    });
+    try {
+      const params = new URLSearchParams({
+        session_id: sessionId.current,
+        message: text + paperContext,
+      });
+      const res = await fetch(`${API_BASE}/agent-chat?${params}`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+
       if (res.status === 429) {
         setMessages((prev) => [
           ...prev,
@@ -147,16 +213,83 @@ export default function AppPage() {
           </Link>
         </div>
 
+        <div className="user-info">
+          <span className="user-name">{userName}</span>
+          <span className="user-email">{userEmail}</span>
+        </div>
+
+        <div className="team-section">
+          <div className="team-header" onClick={() => setShowTeamPanel(!showTeamPanel)}>
+            <span className="sidebar-section-label">Team</span>
+            <span className="team-toggle">{showTeamPanel ? '▲' : '▼'}</span>
+          </div>
+
+          {currentTeam && !showTeamPanel && (
+            <div className="current-team-name">{currentTeam.team_name}</div>
+          )}
+
+          {showTeamPanel && (
+            <div className="team-panel">
+              {teams.length === 0 ? (
+                <>
+                  <p className="team-empty">You're not in a team yet.</p>
+                  <input
+                    className="team-input"
+                    placeholder="Team name"
+                    value={teamName}
+                    onChange={(e) => setTeamName(e.target.value)}
+                  />
+                  <button className="team-btn" onClick={createTeam}>
+                    Create team
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="team-list">
+                    {teams.map(t => (
+                      <div
+                        key={t.team_id}
+                        className={`team-item ${currentTeam?.team_id === t.team_id ? 'team-item-active' : ''}`}
+                        onClick={() => setCurrentTeam(t)}
+                      >
+                        {t.team_name}
+                        <span className="team-role">{t.your_role}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {currentTeam && (
+                    <div className="invite-section">
+                      <p className="sidebar-section-label" style={{marginTop: '12px'}}>
+                        Invite teammate
+                      </p>
+                      <input
+                        className="team-input"
+                        placeholder="their@email.com"
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                      />
+                      <button className="team-btn" onClick={inviteMember}>
+                        Send invite
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {teamMessage && (
+                <p className="team-message">{teamMessage}</p>
+              )}
+            </div>
+          )}
+        </div>
+
         <button
           className="upload-zone"
           onClick={() => fileInputRef.current?.click()}
           disabled={isUploading}
         >
-          {isUploading ? (
-            <Loader2 size={17} className="spin" />
-          ) : (
-            <Plus size={17} />
-          )}
+          {isUploading ? <Loader2 size={17} className="spin" /> : <Plus size={17} />}
           <span>{isUploading ? 'Indexing...' : 'Upload a paper'}</span>
         </button>
         <input
@@ -185,7 +318,7 @@ export default function AppPage() {
 
         <div className="sidebar-hint">
           <Sparkles size={13} />
-           Don't have a PDF? Just ask me to find one on any topic.
+          Don't have a PDF? Just ask me to find one on any topic.
         </div>
       </aside>
 

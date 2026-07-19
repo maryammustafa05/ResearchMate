@@ -281,6 +281,119 @@
 .composer-send:hover:not(:disabled) {
   transform: scale(1.06);
 }
+.user-info {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 0 16px;
+  border-bottom: 1px solid var(--border-faint);
+  margin-bottom: 16px;
+}
+.user-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+.user-email {
+  font-size: 0.78rem;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.team-section {
+  margin-top: 20px;
+  border-top: 1px solid var(--border-faint);
+  padding-top: 16px;
+}
+.team-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+.team-toggle {
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+}
+.current-team-name {
+  font-size: 0.86rem;
+  color: var(--glow-bright);
+  margin-top: 6px;
+}
+.team-panel {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.team-empty {
+  font-size: 0.82rem;
+  color: var(--text-tertiary);
+}
+.team-input {
+  background: var(--bg-deep);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-family: var(--font-body);
+  width: 100%;
+}
+.team-input:focus {
+  outline: none;
+  border-color: var(--glow-core);
+}
+.team-btn {
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: rgba(91,140,255,0.1);
+  color: var(--glow-bright);
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+.team-btn:hover {
+  background: rgba(91,140,255,0.2);
+}
+.team-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.team-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.84rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.team-item:hover {
+  background: var(--bg-card-hover);
+}
+.team-item-active {
+  background: rgba(91,140,255,0.1);
+  border: 1px solid var(--border-soft);
+}
+.team-role {
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+.invite-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.team-message {
+  font-size: 0.82rem;
+  color: var(--glow-bright);
+  padding: 6px 0;
+}
 
 @media (max-width: 768px) {
   .sidebar {
