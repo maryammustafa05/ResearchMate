@@ -36,7 +36,7 @@ def embed_texts(texts):
     response=co.embed(texts=texts,model="embed-english-v3.0",input_type="search_query")
     return response.embeddings
 
-def store_chunks(chunks, session_id, paper_title, pdf_url):
+def store_chunks(chunks, session_id, paper_title, pdf_url,team_id=None, uploaded_by=None):
     try:
         chroma_client.delete_collection(session_id)
     except Exception:
@@ -45,7 +45,7 @@ def store_chunks(chunks, session_id, paper_title, pdf_url):
     embeddings=embed_texts(chunks)
     ids = [f"chunk_{i}" for i in range(len(chunks))]
 
-    metadata = [{"chunk_id":i,"title":paper_title,"pdf_url":pdf_url} for i in range (len(chunks))]
+    metadata = [{"chunk_id":i,"title":paper_title,"pdf_url":pdf_url, "team_id": team_id or "","uploaded_by": uploaded_by or ""} for i in range (len(chunks))]
     collection.add(
         documents=chunks,
         embeddings=embeddings,

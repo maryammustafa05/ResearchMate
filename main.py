@@ -204,7 +204,7 @@ def clean_response(text):
 
 agent_conversations={}
 @app.post("/agent-chat")
-def agent_chat(session_id: str, message: str):
+def agent_chat(session_id: str, message: str,current_user:User=Depends(get_current_user),db:Session=Depends(get_db)):
     if session_id not in agent_conversations:
         agent_conversations[session_id] = [
             ("system", "You are a research assistant. You ONLY know about papers that have been uploaded or indexed into this system — you have NO knowledge of any other papers, including famous ones from your training data. NEVER invent a paper's title or content. If a user asks to find papers on a topic that isn't already available, use the search_and_index_arxiv tool to find and index a REAL paper before answering. Never substitute a well-known paper name you remember from training. When you find or reference a paper, ALWAYS include its real title and PDF link in your response if available — do not omit them even if you think the user only wants the session_id. NEVER generate fake tool results or pretend you called a tool when you did not. If you don't have specific information (like a PDF link) from an actual previous tool call in this conversation, say so honestly — do not search again or invent a new paper unless the user explicitly asks for a different one,NEVER mention, display, or reference session_ids in your responses to the user — they are internal implementation details. Refer to papers only by their title or topic. Session_ids are for your internal tool use only, never for the user to see.")
@@ -356,3 +356,23 @@ def get_my_teams(current_user:User=Depends(get_current_user),db:Session=Depends(
             "created_at": team.created_at
         })
     return {"teams":teams}
+@app.get("/teams/{team_id}/papers")
+def get_team_papers(team_id:str, current_user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    membership=db.query(TeamMember).filter(TeamMember.team_id==team_id,TeamMember.user_id==current_user.id).first()
+    if not membership:
+        raise HTTPException(status_code=403,detail="You are not a member of this team")
+    collections=chroma_client.list_collections()
+    team_papers=[]
+    for c in collections:
+        collection=chroma_client.get_collection(c.name)
+        first_chunk=collection.get(limit=1)
+        if first_chunk["metadatas"] and first_chunk["metadatas"][0]:
+            meta = first_chunk["metadatas"][0]
+            if meta.get("team_id") == team_id:
+                team_papers.append({
+                    "session_id": c.name,
+                    "title": meta.get("title", "Unknown"),
+                    "uploaded_by": meta.get("uploaded_by", "Unknown"),
+                    "chunk_count": c.count()
+                })
+    return {"team_id": team_id, "papers": team_papers}
