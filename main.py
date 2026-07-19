@@ -105,9 +105,9 @@ async def upload_paper(
     session_id = str(uuid.uuid4())
     paper_title = file.filename.replace(".pdf", "")
 
-    collection = store_chunks(chunks, session_id, paper_title, "uploaded_file")
+    collection = store_chunks(chunks, session_id, paper_title, "uploaded_file",team_id=team_id,uploaded_by=current_user.email)
 
-    global CURRENT_SESSION_ID
+    global CURRENT_SESSION_IDs
     global CURRENT_PAPER_TITLE
     CURRENT_SESSION_ID = session_id
     CURRENT_PAPER_TITLE = paper_title
@@ -232,8 +232,10 @@ def agent_chat(session_id: str, message: str,current_user:User=Depends(get_curre
         
     except RateLimitError:
         raise HTTPException(status_code=429, detail="We've hit our usage limit for now. Please try again in a few minutes.")
-    except Exception:
-        raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
+    except Exception as e:
+       import traceback
+       traceback.print_exc()
+       raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 class SignupRequest(BaseModel):
     email: str
     password: str
