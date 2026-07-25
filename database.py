@@ -43,4 +43,14 @@ class TeamMember(Base):
     joined_at = Column(DateTime, default=datetime.now(timezone.utc))
     team = relationship("Team", back_populates="members")
     user = relationship("User", back_populates="team_memberships")
+
+class Paper(Base):
+    __tablename__="papers" 
+    id=Column(String,primary_key=True,default=lambda:str(uuid.uuid4()))
+    session_id=Column(String,nullable=False,unique=True)
+    title=Column(String,nullable=False)
+    uploaded_by=Column(String,ForeignKey("users.id"),nullable=False)
+    team_id=Column(String,ForeignKey("teams.id"),nullable=True)
+    chunk_count=Column(String,nullable=False)
+    created_at=Column(DateTime,default=datetime.now(timezone.utc))
 Base.metadata.create_all(bind=engine)

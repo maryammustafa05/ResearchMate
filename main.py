@@ -11,7 +11,7 @@ import uuid
 from agent import supervisor_executor
 from groq import RateLimitError
 from rag_core import read_pdf_bytes, chunk_text, store_chunks, embed_query, chroma_client
-from database import get_db, User, Team, TeamMember, Base, engine
+from database import get_db, User, Team, TeamMember,Paper, Base, engine
 from auth import hash_password, verify_password, create_access_token, get_current_user
 from sqlalchemy.orm import Session
 from fastapi import Depends
@@ -104,8 +104,10 @@ async def upload_paper(
 
     session_id = str(uuid.uuid4())
     paper_title = file.filename.replace(".pdf", "")
-
-    collection = store_chunks(chunks, session_id, paper_title, "uploaded_file",team_id=team_id,uploaded_by=current_user.email)
+    store_chunks(chunks,session_id,paper_title,"uploaded_file",team_id=team_id,uploaded_by=current_user.email)
+    paper=Paper(session_id=session_id,title=paper_title,uploaded_by=current_user.id,team_id=team_id,chunk_count=str(len(chunks)))
+    db.add(paper)
+    db.commit()
 
     global CURRENT_SESSION_IDs
     global CURRENT_PAPER_TITLE
@@ -378,3 +380,13 @@ def get_team_papers(team_id:str, current_user:User=Depends(get_current_user),db:
                     "chunk_count": c.count()
                 })
     return {"team_id": team_id, "papers": team_papers}
+@app.get("/my-papers")
+def get_my_papers(current_user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    papers=db.query(Paper).filter(Paper.uploaded_by==current_user.id).order_by(Paper.created_at.desc()).all()
+    return { "papers": [
+        {
+            "session_id":p.session_id,"title":p.title,"chunk_count": p.chunk_count,"team_id": p.team_id, "created_at": p.created_at
+        }
+        for p in papers
+    ]
+    }
